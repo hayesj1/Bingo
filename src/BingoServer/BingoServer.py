@@ -4,8 +4,11 @@ import random
 from flask import Flask, request, jsonify, redirect, url_for, make_response
 from flask_sqlalchemy import SQLAlchemy
 
+from BingoServer.bingo import BingoController, DrawListener, GameSpeed
+
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'  # bingo.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://admin:hayesj3@localhost:5432/Bingo'
+# app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False  # Gives a warning if not set
 app.secret_key = '\x91\x15\xa8\xdd\xcf\xdd\xd8d\xcfs\x99\xe5\x03L\xf7\x81d\x04\x19~\x96\xe8\xec\xda'
 db = SQLAlchemy(app)
@@ -43,16 +46,16 @@ class Session(db.Model):
 
 
 class Board(db.Model):
-    board_id = db.Column(db.Integer, primary_key=True)
-    session_id = db.Column(db.Integer, db.ForeignKey('session.id'))
-    b_col = []
-    i_col = []
-    n_col = []
-    g_col = []
-    o_col = []
+	id = db.Column(db.Integer, primary_key=True)
+	session_id = db.Column(db.Integer, db.ForeignKey('session.id'), primary_key=True)
+	b_col = db.Column(db.PickleType)
+	i_col = db.Column(db.PickleType)
+	n_col = db.Column(db.PickleType)
+	g_col = db.Column(db.PickleType)
+	o_col = db.Column(db.PickleType)
 
     def __init__(self, player_num, session_id):
-        self.board_id = player_num
+	    self.id = player_num
         self.session_id = session_id
         self.b_col = make_rand_list(1, 20, 5)
         self.i_col = make_rand_list(21, 40, 5)
@@ -69,10 +72,10 @@ def make_rand_list(lbound, ubound, cnt):
     i = 0
     while i < cnt:
         n = random.randrange(lbound, ubound, 1)
-        if {n: False} in rand_list:
+        if n in rand_list:
             continue
         else:
-            rand_list.append({n: False})
+	        rand_list.append(n)
             i += 1
     return rand_list
 
@@ -92,12 +95,12 @@ class CustomEncoder(json.JSONEncoder):
             }
         elif isinstance(obj, Board):
             return {
-                "uri": '/bingo/sessions/%d/boards/%d' % (obj.session.id, obj.board_id),
-                "b": obj.b_col,
-                "i": obj.i_col,
-                "n": obj.n_col,
-                "g": obj.g_col,
-                "o": obj.o_col
+	            "uri": '/bingo/sessions/%d/boards/%d' % (obj.session_id, obj.id),
+                "b":  obj.b_col,
+                "i":  obj.i_col,
+                "n":  obj.n_col,
+                "g":  obj.g_col,
+                "o":  obj.o_col
             }
         # Let the base class default method raise the TypeError
         return json.JSONEncoder.default(self, obj)
@@ -129,9 +132,9 @@ def join_session(session_id):
 
 @app.route('/bingo/sessions/<int:session_id>/boards/<int:board_id>', methods=['GET'])
 def retrieve_board(session_id, board_id):
-    board = Board.query.filter_by(id=board_id, session_id=session_id).first()
+	board = Board.query.get((board_id, session_id))
     db.session.commit()
-    return make_response(jsonify({'status': 'OK', 'board': board}), 200)
+return make_response(json.dumps({ 'status': 'OK', 'board': board }, cls=CustomEncoder), 200)
 
 
 @app.route('/bingo/sessions', methods=['POST'])
@@ -165,7 +168,9 @@ def request_board(session_id):
     Session.query.filter_by(id=session_id).update({'cur_players': plyr_num})
     db.session.add(board)
     db.session.commit()
-    return make_response({'status': 'CREATED', 'uri': url_for('retrieve_board', session_id=session.id, board_id=plyr_num)}, 201)
+    return make_response(
+		    jsonify({ 'status': 'CREATED', 'uri': url_for('retrieve_board', session_id=session.id, board_id=plyr_num) }),
+		    201)
 
 
 @app.route('/bingo/sessions/<int:session_id>/boards/<int:board_id>', methods=['DELETE'])
